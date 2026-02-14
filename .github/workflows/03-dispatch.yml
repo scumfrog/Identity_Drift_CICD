@@ -2,6 +2,11 @@ name: 03-dispatch
 
 on:
   workflow_dispatch:
+    inputs:
+      audience:
+        description: "OIDC token audience (for H4 audience-binding experiment)"
+        required: true
+        default: "ci-oidc-lab"
 
 permissions:
   id-token: write
@@ -33,7 +38,7 @@ jobs:
       - name: Request OIDC token and call consumer
         env:
           CONSUMER_URL: ${{ secrets.CONSUMER_URL }}
-          AUDIENCE: ci-oidc-lab
+          AUDIENCE: ${{ inputs.audience }}
         run: |
           set -euo pipefail
           if [ -z "${CONSUMER_URL:-}" ]; then
