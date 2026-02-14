@@ -1,0 +1,74 @@
+name: 03-dispatch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  oidc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect context
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          ctx = {
+            "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+            "ref": os.environ.get("GITHUB_REF"),
+            "sha": os.environ.get("GITHUB_SHA"),
+            "actor": os.environ.get("GITHUB_ACTOR"),
+            "repository": os.environ.get("GITHUB_REPOSITORY"),
+            "workflow": os.environ.get("GITHUB_WORKFLOW"),
+            "job": os.environ.get("GITHUB_JOB"),
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+          }
+          open("context.json","w",encoding="utf-8").write(json.dumps(ctx, indent=2, sort_keys=True))
+          print(json.dumps(ctx, indent=2, sort_keys=True))
+          PY
+      - name: Request OIDC token and call consumer
+        env:
+          CONSUMER_URL: ${{ secrets.CONSUMER_URL }}
+          AUDIENCE: ci-oidc-lab
+        run: |
+          set -euo pipefail
+          if [ -z "${CONSUMER_URL:-}" ]; then
+            echo '{"ok":false,"error":"missing_CONSUMER_URL_secret","workflow_context":{}}' > result.json
+            exit 0
+          fi
+          ENDPOINT="$CONSUMER_URL"
+          case "$ENDPOINT" in
+            */introspect) ;;
+            *) ENDPOINT="${ENDPOINT%/}/introspect" ;;
+          esac
+          TOKEN="$(python3 - <<'PY'
+          import os, json, urllib.request
+          aud = os.environ.get("AUDIENCE","")
+          req_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          req_tok = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+          url = req_url + ("&audience=" + aud if aud else "")
+          req = urllib.request.Request(url, headers={"Authorization":"Bearer " + req_tok})
+          print(json.loads(urllib.request.urlopen(req).read())["value"])
+          PY
+          )"
+          curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" > result_raw.json
+          python3 - <<'PY'
+          import json
+          ctx = json.load(open("context.json","r",encoding="utf-8"))
+          res = json.load(open("result_raw.json","r",encoding="utf-8"))
+          res["workflow_context"] = ctx
+          json.dump(res, open("result.json","w",encoding="utf-8"), indent=2, sort_keys=True)
+          print(json.dumps(res, indent=2, sort_keys=True))
+          PY
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oidc-result-dispatch
+          path: |
+            result.json
+            context.json
