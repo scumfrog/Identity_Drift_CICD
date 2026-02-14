@@ -72,6 +72,30 @@ Ninguno: `04-call-reusable` llama al reusable por path local.
 
 Nota: el consumer se configura por env vars al arrancar. Para que el resultado sea convincente, fija una sola variable de control por experimento.
 
+## Hypotheses (Publishable)
+
+### H3: Workflow Ref Binding
+
+If the consumer does not pin `job_workflow_ref`, any workflow in the same repository with `id-token: write` can mint “equivalent” tokens, collapsing the control-plane into ambient authority.
+
+### H4: Audience Binding (Purpose Binding)
+
+If the consumer does not enforce `aud`, a valid token can be accepted outside its intended purpose, turning into a reusable capability across consumers (“ambient authority”).
+
+## Findings
+
+- A token can be valid and still be unsafe in context: signature verification proves authenticity, not intent.
+- `job_workflow_ref` is a control-plane boundary: pinning workflow references prevents workflow substitution inside the same repo.
+- `aud` is purpose binding, not metadata: when audience is not enforced, tokens become reusable capabilities across consumers.
+- Minimal invariant set (recommended): `iss`, `aud`, `repository`, `event_name`, `ref`, `job_workflow_ref` (+ `environment` when used, + org scoping as needed).
+
+## Experiments Summary
+
+| Experiment | Consumer pin | Single knob | Expected outcome |
+|---|---|---|---|
+| H3 | `ALLOWED_WORKFLOWS=.../01-push.yml@refs/heads/main` | `job_workflow_ref` | `01-push` STRICT OK, `05-alt` STRICT FAIL |
+| H4 | `ALLOWED_WORKFLOWS=.../03-dispatch.yml@refs/heads/main` | `aud` | `aud=ci-oidc-lab` STRICT OK, `aud=other-service` STRICT FAIL |
+
 ### H3: Workflow Ref Binding (Control-Flow Boundary)
 
 Objetivo: mismo `event_name=push`, mismo `ref=refs/heads/main`, distinta `job_workflow_ref` => STRICT debe rechazar el workflow “no permitido”.
