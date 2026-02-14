@@ -67,3 +67,57 @@ python /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/
 ## Ajuste rápido que falta (antes de correr)
 
 Ninguno: `04-call-reusable` llama al reusable por path local.
+
+## Demo Modes (H3/H4)
+
+Nota: el consumer se configura por env vars al arrancar. Para que el resultado sea convincente, fija una sola variable de control por experimento.
+
+### H3: Workflow Ref Binding (Control-Flow Boundary)
+
+Objetivo: mismo `event_name=push`, mismo `ref=refs/heads/main`, distinta `job_workflow_ref` => STRICT debe rechazar el workflow “no permitido”.
+
+Config del consumer (pin a solo `01-push`):
+
+```bash
+cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
+. .venv/bin/activate
+ALLOWED_WORKFLOWS="scumfrog/Identity_Drift_CICD/.github/workflows/01-push.yml@refs/heads/main" \
+ALLOWED_AUDIENCES="ci-oidc-lab" \
+uvicorn consumer:app --host 0.0.0.0 --port 8081
+```
+
+Cómo dispararlo:
+
+- Haz un push a `main` (esto ejecuta `01-push` y `05-alt`).
+
+Resultado esperado:
+
+- `01-push`: `STRICT ok=true`
+- `05-alt`: `STRICT ok=false` con `workflow_ref_not_allowed: .../05-alt.yml@refs/heads/main`
+
+### H4: Audience Binding (Un Solo Knob)
+
+Objetivo: misma `job_workflow_ref`, mismo `event`, mismo `ref`… solo cambia `aud`.
+
+Config del consumer (pin a `03-dispatch`, y `ALLOWED_AUDIENCES=ci-oidc-lab`):
+
+```bash
+cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
+. .venv/bin/activate
+ALLOWED_WORKFLOWS="scumfrog/Identity_Drift_CICD/.github/workflows/03-dispatch.yml@refs/heads/main" \
+ALLOWED_AUDIENCES="ci-oidc-lab" \
+uvicorn consumer:app --host 0.0.0.0 --port 8081
+```
+
+Disparo (dos veces, mismo workflow, distinta audience):
+
+```bash
+unset GITHUB_TOKEN GH_TOKEN
+gh workflow run -R scumfrog/Identity_Drift_CICD "03-dispatch" -f audience=ci-oidc-lab
+gh workflow run -R scumfrog/Identity_Drift_CICD "03-dispatch" -f audience=other-service
+```
+
+Resultado esperado:
+
+- `aud=ci-oidc-lab`: `STRICT ok=true`
+- `aud=other-service`: `STRICT ok=false` con `aud_not_allowed: ['other-service']`
