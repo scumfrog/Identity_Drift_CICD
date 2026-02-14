@@ -56,11 +56,24 @@ jobs:
           print(json.loads(urllib.request.urlopen(req).read())["value"])
           PY
           )"
-          curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" > result_raw.json
+          # Llama al consumer, pero no rompas reproducibilidad si está caído.
+          curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true
           python3 - <<'PY'
           import json
+          from pathlib import Path
+
           ctx = json.load(open("context.json","r",encoding="utf-8"))
-          res = json.load(open("result_raw.json","r",encoding="utf-8"))
+          http_code = (Path("http_code.txt").read_text(encoding="utf-8").strip() or "000")
+          body = Path("result_raw.txt").read_text(encoding="utf-8", errors="replace")
+          try:
+            res = json.loads(body)
+          except Exception:
+            res = {
+              "ok": False,
+              "error": "consumer_response_not_json_or_unreachable",
+              "consumer_http_code": http_code,
+              "consumer_body_prefix": body[:2000],
+            }
           res["workflow_context"] = ctx
           json.dump(res, open("result.json","w",encoding="utf-8"), indent=2, sort_keys=True)
           print(json.dumps(res, indent=2, sort_keys=True))
