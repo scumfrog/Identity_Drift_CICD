@@ -66,4 +66,4 @@ python /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/
 
 ## Ajuste rápido que falta (antes de correr)
 
-En `.github/workflows/04-call-reusable.yml`, cambia `YOURORG/ci-oidc-lab` por tu `ORG/REPO`.
+Ninguno: `04-call-reusable` llama al reusable por path local.
