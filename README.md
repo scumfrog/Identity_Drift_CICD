@@ -67,3 +67,7 @@ python /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/
 ## Ajuste rápido que falta (antes de correr)
 
 Ninguno: `04-call-reusable` llama al reusable por path local.
+
+## PR Trigger
+
+Este repo incluye el workflow `02-pr` (evento `pull_request`) para capturar el OIDC en contexto PR y comparar contra `push`/`workflow_dispatch`.
