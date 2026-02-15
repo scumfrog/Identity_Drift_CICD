@@ -13,14 +13,14 @@ def _env_list(name: str, default: str = "") -> List[str]:
 
 
 EXPECTED: Dict[str, Any] = {
-    # Si lo defines, STRICT/LAX pinnean el repositorio exacto. Si no, no se valida repo (fase 1 rápida).
+    # If set, STRICT/LAX pin the exact repository. If unset, repo is not validated (quick phase 1).
     "repository": os.environ.get("EXPECTED_REPOSITORY", "").strip(),
-    # Si lo defines, STRICT pinnea job_workflow_ref exacto(s). Si no, no se valida workflow_ref.
+    # If set, STRICT pins exact job_workflow_ref values. If unset, workflow_ref is not validated.
     "allowed_workflows": _env_list("ALLOWED_WORKFLOWS", ""),
     "allowed_event_names": _env_list("ALLOWED_EVENT_NAMES", "push,workflow_dispatch,workflow_call"),
     "allowed_ref_regex": os.environ.get("ALLOWED_REF_REGEX", r"^refs/heads/main$"),
     "allowed_audiences": _env_list("ALLOWED_AUDIENCES", "ci-oidc-lab"),
-    # Opcional: atar a environment (GitHub Environments)
+    # Optional: bind to a GitHub Environment
     "allowed_environments": _env_list("ALLOWED_ENVIRONMENTS", ""),
 }
 
@@ -40,7 +40,7 @@ def _norm_aud(aud: Any) -> List[str]:
 def evaluate_policies(claims: Dict[str, Any]) -> Dict[str, Any]:
     results: Dict[str, Any] = {}
 
-    # Policy LAX: solo binder mínimo (ej: issuer + firma ya se validó; aquí solo repo).
+    # LAX policy: minimal binding (e.g., issuer + signature already verified; here we optionally check repo).
     lax_ok = True
     lax_reasons: List[str] = []
     repo = _get(claims, "repository")
@@ -49,7 +49,7 @@ def evaluate_policies(claims: Dict[str, Any]) -> Dict[str, Any]:
         lax_reasons.append(f"repository_mismatch: {repo}")
     results["LAX"] = {"ok": lax_ok, "reasons": lax_reasons}
 
-    # Policy STRICT: ata invariantes de contexto relevantes.
+    # STRICT policy: bind relevant contextual invariants.
     strict_ok = True
     strict_reasons: List[str] = []
 
@@ -57,7 +57,7 @@ def evaluate_policies(claims: Dict[str, Any]) -> Dict[str, Any]:
     ref = _get(claims, "ref")
     workflow_ref = _get(claims, "job_workflow_ref") or _get(claims, "workflow_ref")
     aud_list = _norm_aud(_get(claims, "aud"))
-    environment = _get(claims, "environment")  # puede no existir si no usas environments
+    environment = _get(claims, "environment")  # may be absent if you don't use environments
 
     if EXPECTED["repository"] and repo != EXPECTED["repository"]:
         strict_ok = False
@@ -88,8 +88,8 @@ def evaluate_policies(claims: Dict[str, Any]) -> Dict[str, Any]:
 
     results["STRICT"] = {"ok": strict_ok, "reasons": strict_reasons}
 
-    # STRICT+: pines fuertes opcionales (ej: sha exacto) se pueden agregar aquí.
-    # Mantengo el lab simple: el pin más útil suele ser workflow_ref exacto + aud exacta.
+    # STRICT+: optional stronger pins (e.g., exact commit SHA) can be added here.
+    # This lab keeps it simple: the most useful pins are exact workflow_ref + exact audience.
     results["STRICT_PLUS"] = {
         "ok": strict_ok,
         "reasons": list(strict_reasons),

@@ -102,7 +102,7 @@ jobs:
           print(json.loads(urllib.request.urlopen(req).read())["value"])
           PY
           )"
-          # Llama al consumer, pero no rompas reproducibilidad si está caído.
+          # Call the consumer, but preserve reproducibility if it is down.
           : > result_raw.txt
           : > http_code.txt
           curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true

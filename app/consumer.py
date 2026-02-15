@@ -87,18 +87,18 @@ async def introspect(
     if not token:
         raise HTTPException(status_code=401, detail="Empty Bearer token")
 
-    # 1) claims sin verificar para descubrir issuer
+    # 1) Unverified claims to discover the issuer
     try:
         unverified = _get_unverified_claims(token)
         issuer = unverified.get("iss") or DEFAULT_ISSUER
     except Exception as e:
-        # Evita 500s por tokens basura: el lab debe devolver un JSON estable.
+        # Avoid 500s on garbage tokens: the lab should return stable JSON.
         return {
             "ok": False,
             "error": f"jwt_unverified_claims_failed: {type(e).__name__}: {str(e)}",
         }
 
-    # 2) validar firma + exp/nbf + issuer. Aud se valida en policies.
+    # 2) Verify signature + exp/nbf + issuer. Audience is handled in policies.
     jwks = await get_jwks(issuer)
     try:
         jwk_key = _select_jwk(jwks, token)
@@ -117,7 +117,7 @@ async def introspect(
             "unverified": unverified,
         }
 
-    # 3) evaluar políticas (lax vs strict)
+    # 3) Evaluate policies (lax vs strict)
     policy_results = evaluate_policies(verified_claims)
 
     return {

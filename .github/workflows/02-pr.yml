@@ -97,7 +97,7 @@ jobs:
             */introspect) ;;
             *) ENDPOINT="${ENDPOINT%/}/introspect" ;;
           esac
-          # Nota: en PRs desde forks, GitHub puede restringir secrets y/o OIDC.
+          # Note: in PRs from forks, GitHub may restrict secrets and/or OIDC issuance.
           TOKEN="$(python3 - <<'PY'
           import os, json, urllib.request, sys
           aud = os.environ.get("AUDIENCE","")
