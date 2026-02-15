@@ -12,13 +12,52 @@ jobs:
   oidc:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: eu-west-1
-      - name: AWS proof (ListBucket)
-        run: aws s3api list-objects-v2 --bucket "${{ secrets.AWS_LAB_BUCKET }}" --max-keys 5
+      - name: AWS proof (AssumeRoleWithWebIdentity + ListBucket)
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_LAB_BUCKET: ${{ secrets.AWS_LAB_BUCKET }}
+          AWS_REGION: eu-west-1
+          AWS_DEFAULT_REGION: eu-west-1
+        run: |
+          set -euo pipefail
+          echo "Requesting GitHub OIDC token for AWS STS..."
+          TOKEN="$(python3 - <<'PY'
+          import json, os, urllib.request
+          req_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          req_tok = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+          url = req_url + "&audience=sts.amazonaws.com"
+          req = urllib.request.Request(url, headers={"Authorization":"Bearer " + req_tok})
+          print(json.loads(urllib.request.urlopen(req).read())["value"])
+          PY
+          )"
+          echo "Assuming role via STS..."
+          set +e
+          CREDS_JSON="$(aws sts assume-role-with-web-identity \
+            --role-arn "$AWS_ROLE_ARN" \
+            --role-session-name "gh-${GITHUB_RUN_ID:-run}" \
+            --web-identity-token "$TOKEN" \
+            --duration-seconds 900 2> assume_err.txt)"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "assume-role-with-web-identity failed (rc=$rc):"
+            cat assume_err.txt
+            exit "$rc"
+          fi
+          # Export creds for the remainder of this step, then prove access by listing the bucket.
+          CREDS_JSON="$CREDS_JSON" python3 - <<'PY' > aws_env.sh
+          import json, os
+          d=json.loads(os.environ["CREDS_JSON"])
+          c=d["Credentials"]
+          print(f"AWS_ACCESS_KEY_ID={c['AccessKeyId']}")
+          print(f"AWS_SECRET_ACCESS_KEY={c['SecretAccessKey']}")
+          print(f"AWS_SESSION_TOKEN={c['SessionToken']}")
+          PY
+          set -a
+          . ./aws_env.sh
+          set +a
+          echo "Listing bucket (should succeed on push/main in STRICT)..."
+          aws s3api list-objects-v2 --bucket "$AWS_LAB_BUCKET" --max-keys 5
       - name: Collect context
         run: |
           set -euo pipefail
