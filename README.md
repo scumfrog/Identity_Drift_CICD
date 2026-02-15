@@ -28,7 +28,7 @@ Invariantes mínimas recomendadas para consumidores: `iss`, `aud`, `repository`,
 ## Consumer (local)
 
 ```bash
-cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
+cd app
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
@@ -119,6 +119,5 @@ gh run download -R scumfrog/Identity_Drift_CICD <RUN_ID>
 ## Diffs local (claims / context)
 
 ```bash
-python3 /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/decode_and_diff.py <A.json> <B.json>
+python3 scripts/decode_and_diff.py <A.json> <B.json>
 ```
-
