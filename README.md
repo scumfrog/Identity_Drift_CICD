@@ -1,139 +1,77 @@
 # Identity Drift CI/CD Lab (GitHub Actions OIDC)
 
-Laboratorio reproducible para capturar tokens OIDC reales emitidos por GitHub Actions, inspeccionar claims y demostrar por qué una validación laxa rompe invariantes de binding (sin “weaponizar”).
+Laboratorio reproducible para medir y demostrar fallos de *identity binding* en CI/CD (identity drift / token confusion) usando tokens OIDC reales emitidos por GitHub Actions. El objetivo no es “weaponizar”, sino mostrar qué invariantes se rompen cuando la validación es laxa.
 
-## Layout
+## Qué demuestra
 
-- `app/consumer.py`: FastAPI “token consumer” (`/introspect`, `/policies`, `/health`)
-- `app/policies.py`: políticas LAX vs STRICT (configurables por env vars)
-- `.github/workflows/*.yml`: workflows que piden OIDC y suben artifacts `result.json` + `context.json`
-- `scripts/decode_and_diff.py`: diff local entre dos `result.json`
+- Un token puede ser criptográficamente válido y aun así ser inseguro fuera de su contexto: la firma prueba autenticidad, no intención.
+- `job_workflow_ref` es una frontera del control-plane (H3): evita sustitución de workflows dentro del mismo repo.
+- `aud` es *purpose binding* (H4): evita que un token válido sea reutilizable entre consumidores.
 
-## Ejecutar el Consumer (local)
+Invariantes mínimas recomendadas para consumidores: `iss`, `aud`, `repository`, `event_name`, `ref`, `job_workflow_ref` (+ `environment` si aplica).
+
+## Layout (core)
+
+- `app/consumer.py`: FastAPI consumer (`/introspect`, `/policies`, `/health`)
+- `app/policies.py`: políticas LAX vs STRICT (env vars)
+- `scripts/decode_and_diff.py`: diff local de `result.json`
+- Workflows:
+  - `.github/workflows/01-push.yml`
+  - `.github/workflows/02-pr.yml`
+  - `.github/workflows/05-alt.yml`
+  - `.github/workflows/03-dispatch.yml` (mantener para H4)
+- AWS trust policies (versionadas):
+  - `aws/trust-lax-final.json`
+  - `aws/trust-strict-v1-final.json`
+  - `aws/trust-strict-v2-final.json`
+
+## Consumer (local)
 
 ```bash
 cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-uvicorn consumer:app --host 0.0.0.0 --port 8080
+uvicorn consumer:app --host 0.0.0.0 --port 8081
 ```
 
-Endpoints:
+GitHub Actions llama a `secrets.CONSUMER_URL`:
+- si es `https://<host>`, el workflow agrega `/introspect`
+- si es `https://<host>/introspect`, se usa tal cual
 
-- `GET /health`
-- `GET /policies`
-- `POST /introspect` con header `Authorization: Bearer <OIDC_JWT>`
+## Hipótesis (publicables)
 
-## Configurar políticas (STRICT)
+**H3 — Workflow Ref Binding**
+Si el consumidor no fija `job_workflow_ref`, cualquier workflow del repo con `id-token: write` puede emitir tokens “equivalentes”, colapsando el control-plane en autoridad ambiente.
 
-El consumer lee env vars para evitar hardcode:
+**H4 — Audience Binding (Purpose Binding)**
+Si el consumidor no valida `aud`, un token válido puede ser aceptado fuera de su propósito previsto, convirtiéndose en una capacidad reutilizable entre consumidores.
 
-- `EXPECTED_REPOSITORY` (opcional, ej: `ORG/REPO`; si no se define, no se pinnea repo en fase 1)
-- `ALLOWED_WORKFLOWS` (opcional, coma separada; valores tipo `ORG/REPO/.github/workflows/01-push.yml@refs/heads/main`; si no se define, no se pinnea workflow_ref)
-- `ALLOWED_EVENT_NAMES` (ej: `push,workflow_dispatch`)
-- `ALLOWED_REF_REGEX` (ej: `^refs/heads/main$`)
-- `ALLOWED_AUDIENCES` (ej: `ci-oidc-lab`)
-- `ALLOWED_ENVIRONMENTS` (opcional)
-
-Ejemplo:
-
-```bash
-export EXPECTED_REPOSITORY="YOURORG/ci-oidc-lab"
-export ALLOWED_WORKFLOWS="YOURORG/ci-oidc-lab/.github/workflows/01-push.yml@refs/heads/main,YOURORG/ci-oidc-lab/.github/workflows/03-dispatch.yml@refs/heads/main"
-export ALLOWED_EVENT_NAMES="push,workflow_dispatch"
-export ALLOWED_REF_REGEX="^refs/heads/main$"
-export ALLOWED_AUDIENCES="ci-oidc-lab"
-```
-
-## Conectar GitHub Actions al Consumer
-
-Los workflows hacen `POST` a `secrets.CONSUMER_URL`.
-
-- Si pones `https://<tu-host>`: el workflow le agrega `/introspect` automáticamente.
-- Si pones `https://<tu-host>/introspect`: se usa tal cual.
-
-Notas:
-
-- No se imprime el token en logs.
-- En `pull_request` desde forks, GitHub puede bloquear secrets y/o la emisión de OIDC: el artifact queda con `ok=false` y `error=oidc_token_unavailable_in_this_context`.
-
-## Diffs local
-
-```bash
-python /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/decode_and_diff.py result-push.json result-pr.json
-```
-
-## Ajuste rápido que falta (antes de correr)
-
-Ninguno: `04-call-reusable` llama al reusable por path local.
-
-## Demo Modes (H3/H4)
-
-Nota: el consumer se configura por env vars al arrancar. Para que el resultado sea convincente, fija una sola variable de control por experimento.
-
-## Hypotheses (Publishable)
+## Experimentos (Fase 1: Consumer propio)
 
 ### H3: Workflow Ref Binding
-
-If the consumer does not pin `job_workflow_ref`, any workflow in the same repository with `id-token: write` can mint “equivalent” tokens, collapsing the control-plane into ambient authority.
-
-### H4: Audience Binding (Purpose Binding)
-
-If the consumer does not enforce `aud`, a valid token can be accepted outside its intended purpose, turning into a reusable capability across consumers (“ambient authority”).
-
-## Findings
-
-- A token can be valid and still be unsafe in context: signature verification proves authenticity, not intent.
-- `job_workflow_ref` is a control-plane boundary: pinning workflow references prevents workflow substitution inside the same repo.
-- `aud` is purpose binding, not metadata: when audience is not enforced, tokens become reusable capabilities across consumers.
-- Minimal invariant set (recommended): `iss`, `aud`, `repository`, `event_name`, `ref`, `job_workflow_ref` (+ `environment` when used, + org scoping as needed).
-
-## Experiments Summary
-
-| Experiment | Consumer pin | Single knob | Expected outcome |
-|---|---|---|---|
-| H3 | `ALLOWED_WORKFLOWS=.../01-push.yml@refs/heads/main` | `job_workflow_ref` | `01-push` STRICT OK, `05-alt` STRICT FAIL |
-| H4 | `ALLOWED_WORKFLOWS=.../03-dispatch.yml@refs/heads/main` | `aud` | `aud=ci-oidc-lab` STRICT OK, `aud=other-service` STRICT FAIL |
-
-### H3: Workflow Ref Binding (Control-Flow Boundary)
-
-Objetivo: mismo `event_name=push`, mismo `ref=refs/heads/main`, distinta `job_workflow_ref` => STRICT debe rechazar el workflow “no permitido”.
 
 Config del consumer (pin a solo `01-push`):
 
 ```bash
-cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
-. .venv/bin/activate
 ALLOWED_WORKFLOWS="scumfrog/Identity_Drift_CICD/.github/workflows/01-push.yml@refs/heads/main" \
 ALLOWED_AUDIENCES="ci-oidc-lab" \
 uvicorn consumer:app --host 0.0.0.0 --port 8081
 ```
 
-Cómo dispararlo:
+Trigger: push a `main` (corren `01-push` y `05-alt`).
 
-- Haz un push a `main` (esto ejecuta `01-push` y `05-alt`).
+### H4: Audience Binding (un solo knob)
 
-Resultado esperado:
-
-- `01-push`: `STRICT ok=true`
-- `05-alt`: `STRICT ok=false` con `workflow_ref_not_allowed: .../05-alt.yml@refs/heads/main`
-
-### H4: Audience Binding (Un Solo Knob)
-
-Objetivo: misma `job_workflow_ref`, mismo `event`, mismo `ref`… solo cambia `aud`.
-
-Config del consumer (pin a `03-dispatch`, y `ALLOWED_AUDIENCES=ci-oidc-lab`):
+Config del consumer (pin a `03-dispatch`):
 
 ```bash
-cd /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/app
-. .venv/bin/activate
 ALLOWED_WORKFLOWS="scumfrog/Identity_Drift_CICD/.github/workflows/03-dispatch.yml@refs/heads/main" \
 ALLOWED_AUDIENCES="ci-oidc-lab" \
 uvicorn consumer:app --host 0.0.0.0 --port 8081
 ```
 
-Disparo (dos veces, mismo workflow, distinta audience):
+Trigger (dos ejecuciones, mismo workflow, distinta audience):
 
 ```bash
 unset GITHUB_TOKEN GH_TOKEN
@@ -141,7 +79,46 @@ gh workflow run -R scumfrog/Identity_Drift_CICD "03-dispatch" -f audience=ci-oid
 gh workflow run -R scumfrog/Identity_Drift_CICD "03-dispatch" -f audience=other-service
 ```
 
-Resultado esperado:
+## AWS (Fase 2: IAM real)
 
-- `aud=ci-oidc-lab`: `STRICT ok=true`
-- `aud=other-service`: `STRICT ok=false` con `aud_not_allowed: ['other-service']`
+Objetivo: reproducir el mismo patrón en IAM (LAX vs STRICT) con GitHub OIDC -> STS.
+
+Trust policies:
+- LAX: `aws/trust-lax-final.json` (wildcard repo)
+- STRICT v1: `aws/trust-strict-v1-final.json` (pin `aud` + `sub` a `refs/heads/main`)
+- STRICT v2: `aws/trust-strict-v2-final.json` (v1 + pin `job_workflow_ref` a `01-push`)
+
+Nota: un STRICT v3 con `event_name == push` se probó y rompió incluso `01-push` (STS AccessDenied), por lo que no se mantiene en el repo.
+
+## Evidencia (run IDs)
+
+### Fase 1 (Consumer)
+
+H3 (push/main, workflow pin):
+- `01-push` STRICT OK: run `22022405651`
+- `05-alt` STRICT FAIL (workflow_ref): run `22022405649`
+
+H4 (mismo workflow/ref/event, cambia solo `aud`):
+- `03-dispatch` (`audience=ci-oidc-lab`) STRICT OK: run `22022467100`
+- `03-dispatch` (`audience=other-service`) STRICT FAIL (`aud_not_allowed`): run `22022467170`
+
+### Fase 2 (AWS IAM, STRICT v2)
+
+- push/main `01-push` OK (AssumeRoleWithWebIdentity + ListBucket): run `22033604517`
+- push/main `05-alt` DENIED (STS AccessDenied): run `22033604526`
+- PR `02-pr` DENIED (STS AccessDenied): run `22033644786`
+
+Ver logs / artifacts:
+
+```bash
+unset GITHUB_TOKEN GH_TOKEN
+gh run view -R scumfrog/Identity_Drift_CICD <RUN_ID> --log
+gh run download -R scumfrog/Identity_Drift_CICD <RUN_ID>
+```
+
+## Diffs local (claims / context)
+
+```bash
+python3 /Users/gdeangel/Documents/Projects/SecAudits/Identity_Drift_CICD/scripts/decode_and_diff.py <A.json> <B.json>
+```
+
