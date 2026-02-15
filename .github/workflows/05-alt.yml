@@ -1,4 +1,4 @@
-name: 01-push
+name: 05-alt
 
 on:
   push:
@@ -12,13 +12,6 @@ jobs:
   oidc:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: eu-west-1
-      - name: AWS proof (ListBucket)
-        run: aws s3api list-objects-v2 --bucket "${{ secrets.AWS_LAB_BUCKET }}" --max-keys 5
       - name: Collect context
         run: |
           set -euo pipefail
@@ -63,7 +56,6 @@ jobs:
           print(json.loads(urllib.request.urlopen(req).read())["value"])
           PY
           )"
-          # Llama al consumer, pero no rompas reproducibilidad si está caído.
           : > result_raw.txt
           : > http_code.txt
           curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true
@@ -91,7 +83,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oidc-result-push
+          name: oidc-result-alt
           path: |
             result.json
             context.json

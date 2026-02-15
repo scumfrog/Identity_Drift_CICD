@@ -11,6 +11,13 @@ jobs:
   oidc:
     runs-on: ubuntu-latest
     steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+      - name: AWS proof (ListBucket)
+        run: aws s3api list-objects-v2 --bucket "${{ secrets.AWS_LAB_BUCKET }}" --max-keys 5
       - name: Collect context
         run: |
           set -euo pipefail
@@ -69,14 +76,16 @@ jobs:
           PY
             exit 0
           fi
+          : > result_raw.txt
+          : > http_code.txt
           curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true
           python3 - <<'PY'
           import json
           from pathlib import Path
 
           ctx = json.load(open("context.json","r",encoding="utf-8"))
-          http_code = (Path("http_code.txt").read_text(encoding="utf-8").strip() or "000")
-          body = Path("result_raw.txt").read_text(encoding="utf-8", errors="replace")
+          http_code = (Path("http_code.txt").read_text(encoding="utf-8").strip() or "000") if Path("http_code.txt").exists() else "000"
+          body = Path("result_raw.txt").read_text(encoding="utf-8", errors="replace") if Path("result_raw.txt").exists() else ""
           try:
             res = json.loads(body)
           except Exception:

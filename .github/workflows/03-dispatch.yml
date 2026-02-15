@@ -2,6 +2,11 @@ name: 03-dispatch
 
 on:
   workflow_dispatch:
+    inputs:
+      audience:
+        description: "OIDC token audience (for H4 audience-binding experiment)"
+        required: true
+        default: "ci-oidc-lab"
 
 permissions:
   id-token: write
@@ -33,7 +38,7 @@ jobs:
       - name: Request OIDC token and call consumer
         env:
           CONSUMER_URL: ${{ secrets.CONSUMER_URL }}
-          AUDIENCE: ci-oidc-lab
+          AUDIENCE: ${{ inputs.audience }}
         run: |
           set -euo pipefail
           if [ -z "${CONSUMER_URL:-}" ]; then
@@ -55,14 +60,16 @@ jobs:
           print(json.loads(urllib.request.urlopen(req).read())["value"])
           PY
           )"
+          : > result_raw.txt
+          : > http_code.txt
           curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true
           python3 - <<'PY'
           import json
           from pathlib import Path
 
           ctx = json.load(open("context.json","r",encoding="utf-8"))
-          http_code = (Path("http_code.txt").read_text(encoding="utf-8").strip() or "000")
-          body = Path("result_raw.txt").read_text(encoding="utf-8", errors="replace")
+          http_code = (Path("http_code.txt").read_text(encoding="utf-8").strip() or "000") if Path("http_code.txt").exists() else "000"
+          body = Path("result_raw.txt").read_text(encoding="utf-8", errors="replace") if Path("result_raw.txt").exists() else ""
           try:
             res = json.loads(body)
           except Exception:

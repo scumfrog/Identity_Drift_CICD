@@ -1,8 +1,7 @@
-name: 01-push
+name: 06-aud-other
 
 on:
-  push:
-    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -12,13 +11,6 @@ jobs:
   oidc:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: eu-west-1
-      - name: AWS proof (ListBucket)
-        run: aws s3api list-objects-v2 --bucket "${{ secrets.AWS_LAB_BUCKET }}" --max-keys 5
       - name: Collect context
         run: |
           set -euo pipefail
@@ -38,10 +30,10 @@ jobs:
           open("context.json","w",encoding="utf-8").write(json.dumps(ctx, indent=2, sort_keys=True))
           print(json.dumps(ctx, indent=2, sort_keys=True))
           PY
-      - name: Request OIDC token and call consumer
+      - name: Request OIDC token with other audience and call consumer
         env:
           CONSUMER_URL: ${{ secrets.CONSUMER_URL }}
-          AUDIENCE: ci-oidc-lab
+          AUDIENCE: other-service
         run: |
           set -euo pipefail
           if [ -z "${CONSUMER_URL:-}" ]; then
@@ -63,7 +55,6 @@ jobs:
           print(json.loads(urllib.request.urlopen(req).read())["value"])
           PY
           )"
-          # Llama al consumer, pero no rompas reproducibilidad si está caído.
           : > result_raw.txt
           : > http_code.txt
           curl -sS -X POST "$ENDPOINT" -H "Authorization: Bearer $TOKEN" -o result_raw.txt -w "%{http_code}" > http_code.txt || true
@@ -91,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oidc-result-push
+          name: oidc-result-aud-other
           path: |
             result.json
             context.json
